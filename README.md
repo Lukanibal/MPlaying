@@ -1,4 +1,4 @@
-<img width="1081" height="1081" alt="image" src="https://github.com/user-attachments/assets/f5dab320-0cad-44ce-8457-16206f4b03a1" />
+<img width="256" height="256" alt="the app in it's playing state" src="https://github.com/user-attachments/assets/f5dab320-0cad-44ce-8457-16206f4b03a1" />
 
 # Vibe Player
 
