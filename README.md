@@ -1,3 +1,5 @@
+<img width="1081" height="1081" alt="image" src="https://github.com/user-attachments/assets/f5dab320-0cad-44ce-8457-16206f4b03a1" />
+
 # Vibe Player
 
 Vibe Player is a small Linux desktop companion app that displays the currently playing
@@ -58,3 +60,5 @@ This software is provided **AS IS**, without warranties or guarantees of any
 kind. Use it at your own risk. To the fullest extent permitted by applicable
 law, the author(s) accept no responsibility or liability for any loss, damage,
 or other claim arising from its use, inability to use, or modification.
+
+Not affiliated with Tom Lehrer in any way, his music was used as it's public domain and it slaps <3
