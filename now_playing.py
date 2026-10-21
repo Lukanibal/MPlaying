@@ -28,6 +28,8 @@ CHROMA_GREEN = "#00FF00"
 ART_FADE_START_US = 30_000_000
 ART_FADE_DURATION_US = 10_000_000
 ART_OPEN_HOLD_SECONDS = 30
+ART_TRANSITION_FPS = 25
+ART_TRANSITION_DURATION_SECONDS = 2
 LRCLIB_API_URL = "https://lrclib.net/api"
 LYRICS_TIMEOUT_SECONDS = 12
 LRC_TIMESTAMP_PATTERN = re.compile(r"\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]")
@@ -171,6 +173,76 @@ def parse_lyricsfile(lyricsfile, duration_ms=None):
     return timed_entries
 
 
+def transition_video_path():
+    if getattr(sys, "frozen", False):
+        bundled_path = os.path.join(
+            sys._MEIPASS, "assets", "Matte_Transition_3.mp4"
+        )
+        if os.path.isfile(bundled_path):
+            return bundled_path
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "packaging", "Matte_Transition_3.mp4",
+    )
+
+
+def find_ffmpeg_command():
+    if getattr(sys, "frozen", False):
+        bundled_ffmpeg = os.path.join(os.path.dirname(sys.executable), "ffmpeg")
+        if os.path.isfile(bundled_ffmpeg) and os.access(bundled_ffmpeg, os.X_OK):
+            return [bundled_ffmpeg]
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg:
+        return [ffmpeg]
+    host_exec = shutil.which("distrobox-host-exec")
+    if host_exec:
+        try:
+            subprocess.run(
+                [host_exec, "ffmpeg", "-version"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=True, timeout=3,
+            )
+            return [host_exec, "ffmpeg"]
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return None
+
+
+def load_transition_mattes():
+    video_path = transition_video_path()
+    ffmpeg_command = find_ffmpeg_command()
+    if not os.path.isfile(video_path) or not ffmpeg_command:
+        return []
+
+    scale_filter = (
+        f"fps={ART_TRANSITION_FPS},"
+        f"scale={ART_SIZE}:{ART_SIZE}:force_original_aspect_ratio=increase,"
+        f"crop={ART_SIZE}:{ART_SIZE},format=gray"
+    )
+    try:
+        result = subprocess.run(
+            [
+                *ffmpeg_command, "-nostdin", "-hide_banner", "-loglevel", "error",
+                "-i", video_path, "-vf", scale_filter, "-an", "-sn",
+                "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1",
+            ],
+            check=True, capture_output=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    frame_bytes = ART_SIZE * ART_SIZE
+    if not result.stdout or len(result.stdout) % frame_bytes:
+        return []
+    return [
+        Image.frombytes(
+            "L", (ART_SIZE, ART_SIZE),
+            result.stdout[offset:offset + frame_bytes],
+        )
+        for offset in range(0, len(result.stdout), frame_bytes)
+    ]
+
+
 def load_title_font(size=18):
     for path in TITLE_FONT_PATHS:
         try:
@@ -279,6 +351,7 @@ def load_art(uri, title, album):
 def render_art(
     base_image, title_mask, title_shadow_mask, album_mask, fade_progress,
     controls_alpha, playback_status, size, lyrics_text="", active_word="",
+    previous_image=None, transition_mask=None,
 ):
     width, height = size
     if base_image.size != size:
@@ -286,6 +359,12 @@ def render_art(
         title_mask = title_mask.resize(size, Image.Resampling.LANCZOS)
         title_shadow_mask = title_shadow_mask.resize(size, Image.Resampling.LANCZOS)
         album_mask = album_mask.resize(size, Image.Resampling.LANCZOS)
+    if previous_image is not None and transition_mask is not None:
+        if previous_image.size != size:
+            previous_image = previous_image.resize(size, Image.Resampling.LANCZOS)
+        if transition_mask.size != size:
+            transition_mask = transition_mask.resize(size, Image.Resampling.BILINEAR)
+        base_image = Image.composite(base_image, previous_image, transition_mask)
 
     fade = min(max(fade_progress, 0), 1)
     shadow = Image.new("RGB", base_image.size, "#000000")
@@ -433,6 +512,10 @@ class NowPlaying:
         self.art_image = None
         self.icon_image = None
         self.art_source = None
+        self.transition_mattes = load_transition_mattes()
+        self.transition_previous_art = None
+        self.transition_started_at = None
+        self.transition_frame_index = None
         self.title_mask = None
         self.title_shadow_mask = None
         self.album_mask = None
@@ -553,6 +636,8 @@ class NowPlaying:
             fill="white", width=2,
         )
         self.resize_start = None
+        self.drag_offset_x = None
+        self.drag_offset_y = None
         self.wm_action_active = False
         self.decorations_removed = False
         self.art.bind("<Configure>", self.resize_art)
@@ -569,7 +654,7 @@ class NowPlaying:
         self.remove_window_decorations()
         self.root.deiconify()
         self.root.after(100, self.process_lyrics_results)
-        self.root.after(80, self.sync_lyrics_position)
+        self.root.after(40, self.sync_lyrics_position)
         self.update()
 
     def start_drag(self, event):
@@ -577,6 +662,8 @@ class NowPlaying:
         self.drag_offset_y = event.y_root - self.root.winfo_y()
 
     def drag_window(self, event):
+        if self.drag_offset_x is None or self.drag_offset_y is None:
+            return
         x = event.x_root - self.drag_offset_x
         y = event.y_root - self.drag_offset_y
         self.root.geometry(f"+{x}+{y}")
@@ -929,6 +1016,8 @@ class NowPlaying:
                 x11.XCloseDisplay(display)
 
     def begin_canvas_interaction(self, event):
+        self.drag_offset_x = None
+        self.drag_offset_y = None
         if self.handle_art_click(event) == "break":
             return "break"
         self.wm_action_active = False
@@ -939,7 +1028,7 @@ class NowPlaying:
             return
         if self.resize_start is not None:
             self.resize_window(event)
-        else:
+        elif self.drag_offset_x is not None and self.drag_offset_y is not None:
             self.drag_window(event)
 
     def resize_window(self, event):
@@ -955,6 +1044,8 @@ class NowPlaying:
 
     def stop_resize(self, event=None):
         self.resize_start = None
+        self.drag_offset_x = None
+        self.drag_offset_y = None
         self.wm_action_active = False
 
     def update(self):
@@ -1013,12 +1104,23 @@ class NowPlaying:
                     self.last_track = track_id
                     self.last_title = title
                     self.last_album = album
+                    previous_art = (
+                        self.art_source[0].copy() if self.art_source else None
+                    )
                     duration_seconds = round(length / 1_000_000) if length > 0 else None
                     self.fetch_lyrics(artist, title, album, duration_seconds)
                     self.art_source = load_art(
                         metadata.get("mpris:artUrl"), title, album
                     )
                     if self.art_source:
+                        if previous_art is not None and self.transition_mattes:
+                            self.transition_previous_art = previous_art
+                            self.transition_started_at = time.monotonic()
+                            self.transition_frame_index = -1
+                        else:
+                            self.transition_previous_art = None
+                            self.transition_started_at = None
+                            self.transition_frame_index = None
                         self.title_mask = self.art_source[1]
                         self.title_shadow_mask = self.art_source[2]
                         self.album_mask = self.art_source[3]
@@ -1032,6 +1134,9 @@ class NowPlaying:
                         self.art.itemconfigure(self.title, state="hidden")
                         self.art.itemconfigure(self.album, state="hidden")
                     else:
+                        self.transition_previous_art = None
+                        self.transition_started_at = None
+                        self.transition_frame_index = None
                         self.title_mask = None
                         self.title_shadow_mask = None
                         self.album_mask = None
@@ -1206,6 +1311,7 @@ class NowPlaying:
         self.sync_lyrics_position(render=True, schedule=False)
 
     def sync_lyrics_position(self, render=False, schedule=True):
+        transition_changed = self.advance_art_transition()
         position_us = self.position_us
         if self.playback_status == "Playing":
             position_us += int(
@@ -1231,10 +1337,37 @@ class NowPlaying:
         )
         self.active_lyric_index = line_index
         self.active_word_index = word_index
-        if render or changed:
+        if render or changed or transition_changed:
             self.render_current_art()
         if schedule:
-            self.root.after(80, self.sync_lyrics_position)
+            self.root.after(40, self.sync_lyrics_position)
+
+    def advance_art_transition(self):
+        if self.transition_previous_art is None or not self.transition_mattes:
+            return False
+        elapsed = time.monotonic() - self.transition_started_at
+        duration = len(self.transition_mattes) / ART_TRANSITION_FPS
+        if elapsed >= duration:
+            self.transition_previous_art = None
+            self.transition_started_at = None
+            self.transition_frame_index = None
+            return True
+        frame_index = min(int(elapsed * ART_TRANSITION_FPS), len(self.transition_mattes) - 1)
+        if frame_index == self.transition_frame_index:
+            return False
+        self.transition_frame_index = frame_index
+        return True
+
+    def transition_layers(self):
+        if (
+            self.transition_previous_art is None
+            or self.transition_frame_index is None
+        ):
+            return None, None
+        return (
+            self.transition_previous_art,
+            self.transition_mattes[self.transition_frame_index],
+        )
 
     def current_lyric_text(self):
         if not self.show_lyrics.get() or not self.lyrics:
@@ -1387,6 +1520,7 @@ class NowPlaying:
             self.controls_alpha, self.playback_status, size,
             self.current_lyric_text(),
             self.current_active_word(),
+            *self.transition_layers(),
         )
         self.art.itemconfigure(self.art_image_item, image=self.art_image)
 

@@ -81,6 +81,7 @@ fi
     --collect-all yaml \
     --collect-all PIL \
     --hidden-import _dbus_bindings \
+    --add-data "$ROOT_DIR/packaging/Matte_Transition_3.mp4:assets" \
     "$ROOT_DIR/now_playing.py"
 
 mkdir -p "$APPDIR/usr/bin" "$OUTPUT_DIR"
