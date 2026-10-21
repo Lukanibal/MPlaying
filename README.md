@@ -1,4 +1,6 @@
-<img width="256" height="256" alt="the app in it's playing state" src="https://github.com/user-attachments/assets/f5dab320-0cad-44ce-8457-16206f4b03a1" />
+<img width="256" height="256" alt="the app in it's playing state" src="https://github.com/user-attachments/assets/f5dab320-0cad-44ce-8457-16206f4b03a1" /> <img width="256" height="256" alt="the interface when the artwork is set to fade so it can be chroma keyed into frame" src="https://github.com/user-attachments/assets/d87d6d3b-33dd-4490-93f4-fc1b612c2902" /> <img width="298" height="144" alt="the settings screen" src="https://github.com/user-attachments/assets/b8ed776a-1dd0-4627-b0e7-7975800b06c7" />
+
+
 
 # Vibe Player
 
