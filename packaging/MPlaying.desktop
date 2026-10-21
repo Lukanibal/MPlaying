@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MPlaying
+Comment=Now playing artwork and synchronized lyrics
+Exec=mplaying
+Icon=mplaying
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+StartupNotify=false

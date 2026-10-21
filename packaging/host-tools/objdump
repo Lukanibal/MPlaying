@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+set -euo pipefail
+exec distrobox-host-exec /usr/bin/objdump "$@"
